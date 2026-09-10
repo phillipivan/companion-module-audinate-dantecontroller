@@ -5,6 +5,7 @@
 
 import { debounce, throttle, type DebouncedFunc } from 'es-toolkit/compat'
 import { createModuleLogger } from '@companion-module/base'
+import { collidingIds } from '../utils/sanitise.js'
 import { UpdateActions } from '../actions.js'
 import { UpdateFeedbacks } from '../feedbacks.js'
 import { UpdateVariableDefinitions, CheckVariables } from '../variables.js'
@@ -890,11 +891,69 @@ export function channelsAreSettling(self: DanteInstance, deviceIp: string): bool
 	return (channelSettleDeadlines.get(self)?.get(deviceIp) ?? 0) > Date.now()
 }
 
+/** Collisions already reported, so a standing one is said once rather than on every rebuild. */
+const reportedIdCollisions = new WeakMap<DanteInstance, Set<string>>()
+
+/** Forgets which collisions have been reported, so a reconnect says them again. */
+export function resetIdCollisionWarnings(self: DanteInstance): void {
+	reportedIdCollisions.delete(self)
+}
+
+/**
+ * Warns when two device names sanitise to the same id.
+ *
+ * Both the variable ids and the per-device option ids are built from a device's name run through
+ * `sanitiseVariableId`, which is lossy - `Rack 1` and `Rack-1` both become `Rack_1`. The two devices
+ * then share every variable and every per-device action field, and the last one discovered wins.
+ * Nothing about the symptoms points at the cause, so say so plainly rather than leaving it to be
+ * puzzled out from a device whose values keep changing under it.
+ *
+ * Checked over the names the definitions are actually built from, which includes devices whose
+ * channels are only remembered - those still generate option fields, so they still collide.
+ */
+function warnOnIdCollisions(self: DanteInstance): void {
+	const names = new Set<string>()
+	for (const device of Object.values(self.devicesData)) {
+		if (device?.name) names.add(device.name)
+	}
+	for (const byDevice of [
+		self.rxChannelsChoices,
+		self.txChannelsChoices,
+		self.videoRxChannelsChoices ?? {},
+		self.videoTxChannelsChoices ?? {},
+	]) {
+		for (const name of Object.keys(byDevice)) names.add(name)
+	}
+
+	const collisions = collidingIds(names)
+	if (collisions.size === 0) return
+
+	let reported = reportedIdCollisions.get(self)
+	if (!reported) {
+		reported = new Set()
+		reportedIdCollisions.set(self, reported)
+	}
+
+	for (const [id, group] of collisions) {
+		// keyed on the group as well as the id, so a third device joining an existing collision is news
+		const key = `${id}:${[...group].sort().join('|')}`
+		if (reported.has(key)) continue
+		reported.add(key)
+
+		logger.warn(
+			`Device names ${group.map((name) => `'${name}'`).join(' and ')} both become '${id}' once characters ` +
+				`Companion cannot use in an id are replaced, so they share variables and per-device action fields ` +
+				`and the last one discovered wins. Rename one of them to tell them apart.`,
+		)
+	}
+}
+
 /** Rebuilds and re-registers this instance's actions, variables, and feedbacks after device data changes. */
 export function updateData(self: DanteInstance): void {
 	if (self.debug) {
 		logger.debug(`Rebuilding definitions for ${Object.keys(self.devicesData).length} device(s)`)
 	}
+	warnOnIdCollisions(self)
 	UpdateActions(self)
 	UpdateVariableDefinitions(self)
 	CheckVariables(self)

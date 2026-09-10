@@ -18,3 +18,29 @@
  */
 export const sanitiseVariableId = (id: string, substitute: '' | '.' | '-' | '_' = '_'): string =>
 	id.replaceAll(/[^a-zA-Z0-9-_.]/gm, substitute)
+
+/**
+ * Names that collide once sanitised, grouped by the id they all become.
+ *
+ * Sanitising is lossy: `Rack 1` and `Rack-1` are different devices but the same id. Everything keyed
+ * by that id then belongs to whichever device was seen last - its variables overwrite the other's,
+ * and a per-device option field appears twice in one action with no way to tell the two apart. Rare,
+ * but silent, and impossible to diagnose from the symptoms.
+ *
+ * Only ids that more than one *distinct* name maps to are returned; one name reaching this twice
+ * (two addresses announcing it, say) is not a collision.
+ */
+export function collidingIds(names: Iterable<string>): Map<string, string[]> {
+	const byId = new Map<string, string[]>()
+	for (const name of names) {
+		const id = sanitiseVariableId(name)
+		const group = byId.get(id)
+		if (!group) byId.set(id, [name])
+		else if (!group.includes(name)) group.push(name)
+	}
+
+	for (const [id, group] of byId) {
+		if (group.length < 2) byId.delete(id)
+	}
+	return byId
+}

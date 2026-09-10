@@ -20,6 +20,7 @@ import {
 	cancelCheckVariables,
 	cancelUpdateData,
 	clearDeviceTimeouts,
+	resetIdCollisionWarnings,
 	deviceLabel,
 	resolveDeviceIp,
 } from './devices.js'
@@ -360,6 +361,8 @@ export function initConnection(self: DanteInstance): void {
 	// about to discard
 	cancelUpdateData(self)
 	cancelCheckVariables(self)
+	// a standing name collision is worth saying again for a fresh connection
+	resetIdCollisionWarnings(self)
 	cancelCheckFeedbacks(self)
 
 	self.counter = Buffer.from('0000', 'hex')
