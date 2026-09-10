@@ -354,6 +354,10 @@ describe('parseAvReply', () => {
 			name: 'Decoder Video Channel',
 			sourceChannel: 'Transmit Video Channel',
 			sourceDevice: 'Encoder-001',
+			// this capture predates the flags being understood - it is a resolved subscription that was
+			// not carrying video when taken, the state Dante Controller calls "Subscription is not active"
+			subscriptionResolved: 0,
+			subscriptionActive: 0,
 		})
 	})
 
@@ -415,6 +419,9 @@ describe('parseAvReply', () => {
 			name: 'Decoder Video Channel',
 			sourceChannel: undefined,
 			sourceDevice: undefined,
+			// cleared, so neither resolved nor active - the same zeroes an unrouted channel reports
+			subscriptionResolved: 0,
+			subscriptionActive: 0,
 		})
 	})
 

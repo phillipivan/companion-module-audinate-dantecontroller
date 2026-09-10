@@ -35,6 +35,27 @@ export function isSubscriptionConnected(status: number | undefined): boolean {
 	return status !== undefined && SUBSCRIPTION_STATUS_CONNECTED.includes(status)
 }
 
+/**
+ * Values of a video rx record's `subscriptionActive` byte that mean media is reaching the channel.
+ *
+ * Only 0 and 1 have ever been observed, so this could be a boolean test - it is a set to match the
+ * audio rule above, because audio turned out to have four distinct connected codes and there is no
+ * reason to assume video will not grow more. Adding one is then a line here rather than a rewrite.
+ */
+export const VIDEO_SUBSCRIPTION_ACTIVE: readonly number[] = [1]
+
+/**
+ * True if a video rx channel's `subscriptionActive` byte says media is actually flowing.
+ *
+ * This is the video counterpart of {@link isSubscriptionConnected}, and the distinction it draws is
+ * the one Dante Controller draws: a subscription whose source is present but sending nothing reads
+ * "Subscription is not active" there, and false here. A destination reporting a source is therefore
+ * not on its own evidence of a working crosspoint.
+ */
+export function isVideoSubscriptionActive(active: number | undefined): boolean {
+	return active !== undefined && VIDEO_SUBSCRIPTION_ACTIVE.includes(active)
+}
+
 /** Longest name a Dante device accepts, for both device and channel names. */
 export const DANTE_NAME_MAX_LENGTH = 31
 

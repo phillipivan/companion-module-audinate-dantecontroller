@@ -137,6 +137,14 @@ function readU32At(buffer: Buffer, pointer: number): number | undefined {
 	return buffer.readUInt32BE(pointer)
 }
 
+/** As {@link readU32At}, but for the single-byte flags an `AV_EXTENDED` channel record carries. */
+function readU8At(buffer: Buffer, pointer: number): number | undefined {
+	if (pointer < 0 || pointer + 1 > buffer.length) {
+		return undefined
+	}
+	return buffer.readUInt8(pointer)
+}
+
 /** As {@link readU32At}, but for the u16 pointers and tags `AV_EXTENDED` replies are built from. */
 function readU16At(buffer: Buffer, pointer: number): number | undefined {
 	if (pointer < 0 || pointer + 2 > buffer.length) {
@@ -370,11 +378,34 @@ const AV_CHANNEL_RECORD = {
 	SOURCE_CHANNEL_NAME_POINTER: 48,
 	/** Absent (0) when the channel has no live source. */
 	SOURCE_DEVICE_NAME_POINTER: 50,
+	/**
+	 * 1 once the named source device and channel have been located, 0 while they have not.
+	 *
+	 * Lags reality: a source powered off *after* resolving keeps this at 1 for a while, whereas
+	 * subscribing to the same device while it is off reports 0 at once. So it means "resolved as far
+	 * as this device currently knows", not a live reachability check - which is why it is not what
+	 * the crosspoint feedback gates on.
+	 */
+	SUBSCRIPTION_RESOLVED: 54,
+	/**
+	 * 1 when media is actually flowing to this channel, 0 otherwise - the video analogue of audio's
+	 * subscription status, and the field that answers "is this crosspoint connected".
+	 *
+	 * Established live across five states on an encoder/decoder pair: unrouted, subscribed to a name
+	 * that does not exist, subscribed to a real device that is powered off, resolved with the source
+	 * present but sending nothing, and resolved with video flowing. Only the last reports 1, and it
+	 * is the only state Dante Controller calls connected - the fourth reads "Subscription is not
+	 * active" there. Note the third and fourth are byte-identical in the reply, so this cannot
+	 * distinguish an idle source from an absent one.
+	 */
+	SUBSCRIPTION_ACTIVE: 55,
 }
 
 interface AvChannelRecord {
 	channelNumber: number
 	name?: string
+	subscriptionResolved?: number
+	subscriptionActive?: number
 	sourceChannel?: string
 	sourceDevice?: string
 }
@@ -406,6 +437,9 @@ function parseAvChannelDirectory(reply: Buffer, mediaType: number): AvChannelRec
 			// malformed reply still yields usable 1..n numbering rather than a channel 0.
 			channelNumber: readU16At(reply, descriptorStart + AV_CHANNEL_RECORD.CHANNEL_NUMBER) || records.length + 1,
 			name: parseStringAtPointer(reply, readU16At(reply, descriptorStart + AV_CHANNEL_RECORD.OWN_NAME_POINTER) ?? 0),
+			// single bytes, not u16s - the two sit side by side, so a u16 read would merge them
+			subscriptionResolved: readU8At(reply, descriptorStart + AV_CHANNEL_RECORD.SUBSCRIPTION_RESOLVED),
+			subscriptionActive: readU8At(reply, descriptorStart + AV_CHANNEL_RECORD.SUBSCRIPTION_ACTIVE),
 			sourceChannel: parseStringAtPointer(
 				reply,
 				readU16At(reply, descriptorStart + AV_CHANNEL_RECORD.SOURCE_CHANNEL_NAME_POINTER) ?? 0,
@@ -430,6 +464,10 @@ function parseVideoRxChannels(reply: Buffer): Partial<DeviceData> {
 			name: record.name,
 			sourceChannel: record.sourceChannel,
 			sourceDevice: record.sourceDevice,
+			// receive-side only: the same offsets carry something else in a tx directory, which is why
+			// parseVideoTxChannels takes only the number and name from the very same records
+			subscriptionResolved: record.subscriptionResolved,
+			subscriptionActive: record.subscriptionActive,
 		}
 		// The highest number seen, not the number of records: channel numbers come from the device
 		// now, so a gap in them would otherwise leave `count` short and hide the tail of the list

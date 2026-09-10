@@ -50,6 +50,13 @@ export interface VideoTxChannel {
 export interface VideoRxChannel extends VideoTxChannel {
 	sourceChannel?: string
 	sourceDevice?: string
+	/**
+	 * 1 once the named source has been located, 0 while it has not. Reported as it came off the wire
+	 * rather than as a boolean, so an unrecognised code is preserved for whoever looks next.
+	 */
+	subscriptionResolved?: number
+	/** 1 when media is flowing - see `isVideoSubscriptionActive`, and the offsets in `protocol.ts`. */
+	subscriptionActive?: number
 }
 
 export type VideoTxChannels = Record<number, VideoTxChannel> & { count?: number }

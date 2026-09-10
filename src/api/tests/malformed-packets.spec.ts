@@ -11,13 +11,20 @@ import {
 import type DanteInstance from '../../main.js'
 
 /**
- * No parser may throw on a malformed packet.
+ * No parser may throw on a packet too short to hold the header it reads.
  *
  * They run directly from a socket's 'message' event and `@companion-module/base` installs no
  * `uncaughtException` handler, so a throw here does not lose a packet - it takes the module process
  * down. The SETTINGS and HEARTBEAT sockets are bound to well-known ports on the wildcard address,
  * so anything on the network can send one: a zero-length UDP datagram is legal, and used to be
  * enough to kill the connection.
+ *
+ * The *header* contract is what these pin: a packet too short to hold the fields read before the
+ * protocol check is rejected rather than read. The body is a different matter - a reply carries
+ * dozens of fields at fixed offsets, far too many to bounds-check individually, and a
+ * truncated-but-self-consistent one can still send those reads out of bounds. That is absorbed at
+ * the socket boundary instead; see the random-noise fuzz in `socket-errors.spec.ts`, which drives
+ * the real message handler rather than a parser directly.
  */
 
 const DEVICE_IP = '169.254.120.183'

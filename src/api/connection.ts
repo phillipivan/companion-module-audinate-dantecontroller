@@ -25,6 +25,7 @@ import {
 } from './devices.js'
 import { parseAvReply, parseCmcReply, parseHeartbeatReply, parseReply, parseSettingsReply } from './protocol.js'
 import { danteDiscovery, getMdnsServices } from './discovery.js'
+import { retryMissingVideoDirectories } from './queries.js'
 
 const logger = createModuleLogger('api:connection')
 
@@ -246,7 +247,11 @@ export class DanteConnection {
 
 		const period = this.self.config?.interval ?? 0
 		if (period > 0) {
-			this.interval = setInterval(() => getMdnsServices(this.self), period)
+			this.interval = setInterval(() => {
+				getMdnsServices(this.self)
+				// rides the same tick rather than owning a timer - see retryMissingVideoDirectories
+				retryMissingVideoDirectories(this.self)
+			}, period)
 			// module plumbing rather than network news - the same call as the port announcements
 			if (this.self.debug) {
 				logger.debug('Starting Update Interval: Every ' + period + 'ms')

@@ -12,6 +12,8 @@ import {
 	CHANNEL_MEDIA_TYPE_LABELS,
 	deviceByIdentifier,
 	deviceOptionValue,
+	rememberedTxChannelName,
+	rememberedTxChannelNumber,
 	findDeviceIpByName,
 	findAudioRxChannelByName,
 	findAudioTxChannelByName,
@@ -22,6 +24,7 @@ import {
 	getAudioRxChannelSource,
 	getVideoRxChannelSource,
 	isSubscriptionConnected,
+	isVideoSubscriptionActive,
 	DEVICE_PROPERTIES,
 	DEVICE_PROPERTY_LABELS,
 	deviceProperty,
@@ -127,13 +130,28 @@ function sourceMatches(
 	selectedSourceDeviceName: string | undefined,
 	/** True when the destination and source device selections are the same device - see the '.' self-route shorthand below. */
 	sameDeviceSelected: boolean,
+	/**
+	 * The selected channel's name as last reported, for when the source device is not currently
+	 * reporting one - see `rememberedTxChannelName`. Only ever adds a name to match against; it
+	 * cannot make an unrouted destination look routed, because a destination that reports no source
+	 * matches nothing at all.
+	 */
+	lastKnownSourceChannelName?: string,
 ): boolean {
 	const destinationSourceChannelName = normalizeName(destinationChannel?.sourceChannel)
+	// A destination reporting no source is unrouted, and nothing may match it. Belt-and-braces rather
+	// than the mechanism: no candidate below can be empty, so an unrouted destination already fails
+	// the channel comparison. It states the rule in one place instead of leaving it to emerge from
+	// candidate filtering - and it closes the case where both device names are absent and compare
+	// equal as ''.
+	if (!destinationSourceChannelName) return false
+
 	const sourceChannelCandidates = [
 		selectedSourceChannel,
 		getChannelSubscriptionName(sourceChannel),
 		sourceChannel?.name,
 		sourceChannel?.friendlyName,
+		lastKnownSourceChannelName,
 	]
 		.filter(Boolean)
 		.map((name) => normalizeName(name))
@@ -286,14 +304,27 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 				const sourceChannel =
 					sourceDevice?.videoTx?.[selectedSourceChannel] ??
 					findVideoTxChannelByName(self, opt.sourceDevice, String(selectedSourceChannel))
-				// No separate "connected" status for video (see VideoRxChannelSource) - a matching,
-				// reported source is itself the connected state.
+				// The destination reports its source by name, and both halves of that comparison used to
+				// be resolved from the *source* device's live record - so a source that had gone quiet
+				// made a route the destination still reports read as false. The picker already holds the
+				// name, and the retained choice list still holds the channel's, so neither needs the
+				// source to be reporting. What is *not* substituted is the route itself: an unrouted
+				// destination reports no source and matches nothing.
+				//
+				// The destination's own account of whether media is flowing, which is the same distinction
+				// Dante Controller draws: a subscription whose source is present but sending nothing
+				// reads "Subscription is not active" there. Naming a source is not on its own evidence
+				// of a working crosspoint - this module used to treat it as such and reported connected
+				// for a route carrying nothing.
+				if (!isVideoSubscriptionActive(destinationChannel?.subscriptionActive)) return false
+
 				return sourceMatches(
 					destinationChannel,
 					selectedSourceChannel,
 					sourceChannel,
-					sourceDevice?.name,
+					sourceDevice?.name ?? opt.sourceDevice,
 					opt.destinationDevice == opt.sourceDevice,
+					rememberedTxChannelName(self, sourceDevice?.name ?? opt.sourceDevice, 'video', selectedSourceChannel),
 				)
 			}
 
@@ -302,6 +333,9 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 			const sourceChannel =
 				sourceDevice?.audioTx?.[selectedSourceChannel] ??
 				findAudioTxChannelByName(self, opt.sourceDevice, String(selectedSourceChannel))
+			// Audio does carry a subscription status, and it stays the gate: a destination reporting a
+			// broken subscription is not connected however well the names match. The name fallbacks
+			// below only decide *which* route is named, never whether it is healthy.
 			const subscriptionOk = isSubscriptionConnected(destinationChannel?.subscriptionStatus)
 			return (
 				subscriptionOk &&
@@ -309,8 +343,9 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 					destinationChannel,
 					selectedSourceChannel,
 					sourceChannel,
-					sourceDevice?.name,
+					sourceDevice?.name ?? opt.sourceDevice,
 					opt.destinationDevice == opt.sourceDevice,
+					rememberedTxChannelName(self, sourceDevice?.name ?? opt.sourceDevice, 'audio', selectedSourceChannel),
 				)
 			)
 		},
@@ -527,12 +562,21 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 				)
 				if (!source) return { ...NO_SUBSCRIPTION }
 
-				// No separate "connected" status for video - see VideoRxChannelSource.
 				const sourceChannel = findVideoTxChannelByName(self, source.deviceName, source.channelName)
+				// The number comes from the source device's own directory, so it read 0 whenever that
+				// device was not currently reporting - on a subscription the destination was describing
+				// perfectly well. The retained choice list still holds the mapping. `connected` and the
+				// names are untouched: they come from the destination, which is the authority here.
+				const sourceChannelNumber =
+					sourceChannel?.number ?? rememberedTxChannelNumber(self, source.deviceName, 'video', source.channelName)
 				return {
-					connected: true,
+					// the destination's own flag rather than a hardcoded true - a subscription that names a
+					// source but carries nothing is reported as the subscription it is, not as connected
+					connected: isVideoSubscriptionActive(
+						deviceByIdentifier(self, opt.device)?.videoRx?.[channelNumber]?.subscriptionActive,
+					),
 					device: { name: source.deviceName, ip: resolveDeviceIp(self, source.deviceName) ?? '' },
-					channel: { name: source.channelName, number: sourceChannel?.number ?? 0 },
+					channel: { name: source.channelName, number: sourceChannelNumber ?? 0 },
 				}
 			}
 

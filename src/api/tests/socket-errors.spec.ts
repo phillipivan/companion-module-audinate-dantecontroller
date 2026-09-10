@@ -290,6 +290,25 @@ describe('a malformed packet does not take the connection down', () => {
 		expect(logged).toHaveLength(1)
 	})
 
+	it('absorbs random noise carrying a valid protocol marker and length', () => {
+		// The parsers guard their headers, not their bodies - a settings reply reads dozens of fields
+		// at fixed offsets, and a body that survives the size check can still send one out of bounds.
+		// This is the guarantee that actually matters: whatever arrives, the connection lives.
+		const self = connected()
+		self.devicesData['169.254.120.183'] = { name: 'DeviceA', ports: {} }
+		const template = truncatedSettingsReply(52)
+
+		expect(() => {
+			for (let attempt = 0; attempt < 2000; attempt++) {
+				const noise = Buffer.alloc(template.length)
+				for (let i = 0; i < noise.length; i++) noise[i] = Math.floor(Math.random() * 256)
+				// keep the marker and size, so it gets past the guards and into the body
+				template.subarray(0, 4).copy(noise, 0)
+				socketFor(self, 'SETTINGS').handlers.get('message')?.(noise as never, rinfoFor(noise) as never)
+			}
+		}).not.toThrow()
+	})
+
 	it('still counts the packet as traffic, since the socket is plainly working', () => {
 		const self = connected()
 		socketFor(self, 'SETTINGS').handlers.get('close')?.()

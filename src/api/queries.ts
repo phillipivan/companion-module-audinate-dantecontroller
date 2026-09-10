@@ -106,6 +106,67 @@ function sendChannelQuery(
 }
 
 /**
+ * How many times a device is re-asked for a video directory it has never answered.
+ *
+ * Bounded rather than endless: most devices on a Dante network are not AV-X, and a budget stops
+ * this becoming a standing query for every one of them.
+ */
+const VIDEO_DIRECTORY_ATTEMPTS = 5
+
+/** Attempts spent per `<ip>:<direction>`, weakly held so a discarded instance is still collectable. */
+const videoDirectoryAttempts = new WeakMap<DanteInstance, Map<string, number>>()
+
+/**
+ * Re-asks for video directories that never arrived, once per discovery sweep.
+ *
+ * `getVideoRxChannels`/`getVideoTxChannels` are one-shot: sent when a device's ARC port is first
+ * learned, when a channel-change notification arrives, after one of this module's own writes, and on
+ * the Refresh action. Nothing retried them, so a single dropped reply left the directory permanently
+ * unknown - and the crosspoint feedbacks read the transmit directory to match a destination's
+ * reported source against a selected channel, so they silently read false until somebody pressed
+ * Refresh. The receive side self-heals on the next route change; the transmit side is re-read only
+ * on a *rename*, which may never happen.
+ *
+ * Only devices that answered nothing at all are re-asked. A device that replied has the field set
+ * even when it reported no video channels - including one that does not speak `AV_EXTENDED`, whose
+ * unrecognised-command reply parses as zero channels - so this cannot spin on a device that has
+ * genuinely told us it has none.
+ */
+export function retryMissingVideoDirectories(self: DanteInstance): void {
+	let attempts = videoDirectoryAttempts.get(self)
+	if (!attempts) {
+		attempts = new Map()
+		videoDirectoryAttempts.set(self, attempts)
+	}
+
+	// release the budget of anything no longer on the network, so a device that returns starts over
+	for (const key of [...attempts.keys()]) {
+		if (!self.devicesData[key.slice(0, key.lastIndexOf(':'))]) attempts.delete(key)
+	}
+
+	for (const [ipaddress, device] of Object.entries(self.devicesData)) {
+		// nothing to ask over until discovery has learned where to send it
+		if (!device?.ports?.ARC) continue
+
+		for (const direction of ['rx', 'tx'] as const) {
+			if ((direction === 'rx' ? device.videoRx : device.videoTx) !== undefined) continue
+
+			const key = `${ipaddress}:${direction}`
+			const spent = attempts.get(key) ?? 0
+			if (spent >= VIDEO_DIRECTORY_ATTEMPTS) continue
+			attempts.set(key, spent + 1)
+
+			if (self.debug) {
+				logger.debug(`Re-asking ${deviceLabel(self, ipaddress)} for its video ${direction} directory`)
+			}
+
+			if (direction === 'rx') getVideoRxChannels(self, ipaddress)
+			else getVideoTxChannels(self, ipaddress)
+		}
+	}
+}
+
+/**
  * Queries a device's video rx channels (names and live subscription source) under the
  * `AV_EXTENDED` protocol, using the fixed {@link DANTE_CONST.AV_CHANNEL_DIRECTORY_QUERY_ARGS}
  * argument bytes this opcode requires - an empty-argument query is acknowledged but always reports

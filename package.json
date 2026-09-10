@@ -24,7 +24,7 @@
 		"url": "git+https://github.com/bitfocus/companion-module-audinate-dantecontroller.git"
 	},
 	"engines": {
-		"node": "^26.7",
+		"node": "^26.8.1",
 		"yarn": "^4"
 	},
 	"dependencies": {

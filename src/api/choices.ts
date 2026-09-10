@@ -370,6 +370,43 @@ export function perDeviceChannelFields<Key extends string>(
 	return fields
 }
 
+/**
+ * A transmit channel's name as last reported, read from the retained choice lists.
+ *
+ * The choice lists outlive a device's record (see `channelFieldDevices`), so they still hold a
+ * channel's name while the device itself is not currently reporting. That matters for the crosspoint
+ * feedbacks: a destination names its source by *channel name*, and matching that against a selected
+ * channel *number* needs the source device's own directory - which is exactly what is missing when
+ * the source has gone quiet. Without this the feedback reads false on a route the destination is
+ * still reporting as made.
+ *
+ * Deliberately name resolution only. Whether a subscription is healthy is the destination's to
+ * report, and nothing here may stand in for it.
+ */
+export function rememberedTxChannelName(
+	self: DanteInstance,
+	deviceName: string | undefined,
+	mediaType: ChannelMediaType,
+	channelNumber: number | string,
+): string | undefined {
+	if (deviceName === undefined) return undefined
+	const byDevice = (mediaType === 'video' ? self.videoTxChannelsChoices : self.txChannelsChoices) ?? {}
+	const label = byDevice[deviceName]?.find((choice) => String(choice.id) === String(channelNumber))?.label
+	return label || undefined
+}
+
+/** The reverse of {@link rememberedTxChannelName}: a transmit channel's number, given its name. */
+export function rememberedTxChannelNumber(
+	self: DanteInstance,
+	deviceName: string | undefined,
+	mediaType: ChannelMediaType,
+	channelName: string | undefined,
+): number | undefined {
+	if (deviceName === undefined || channelName === undefined) return undefined
+	const byDevice = (mediaType === 'video' ? self.videoTxChannelsChoices : self.txChannelsChoices) ?? {}
+	return byDevice[deviceName]?.find((choice) => choice.label === channelName)?.id
+}
+
 /** How a channel direction reads in a sentence aimed at the user. */
 const DIRECTION_LABELS: Record<'rx' | 'tx', string> = { rx: 'receive', tx: 'transmit' }
 

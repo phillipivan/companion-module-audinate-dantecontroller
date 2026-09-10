@@ -27,9 +27,27 @@ function devicesData(): DevicesData {
 			},
 			audioTx: { count: 1, 1: { number: 1, name: 'Audio Out 1' } },
 			videoRx: {
-				count: 2,
-				1: { number: 1, name: 'Video In 1', sourceDevice: 'DeviceB', sourceChannel: 'Cam 1' },
+				count: 3,
+				// subscriptionActive 1 = media actually flowing, which is what "connected" means for
+				// video - a channel naming a source but carrying nothing reads "Subscription is not
+				// active" in Dante Controller, and false here. Channel 3 below is exactly that case.
+				1: {
+					number: 1,
+					name: 'Video In 1',
+					sourceDevice: 'DeviceB',
+					sourceChannel: 'Cam 1',
+					subscriptionResolved: 1,
+					subscriptionActive: 1,
+				},
 				2: { number: 2, name: 'Video In 2' },
+				3: {
+					number: 3,
+					name: 'Video In 3',
+					sourceDevice: 'DeviceB',
+					sourceChannel: 'Cam 1',
+					subscriptionResolved: 1,
+					subscriptionActive: 0,
+				},
 			},
 			videoTx: { count: 1, 1: { number: 1, name: 'Video Out 1' } },
 		},
@@ -342,9 +360,9 @@ describe('Crosspoint - Make/Clear actions, video', () => {
 			options: { channelType: 'video', destinationDevice: 'DeviceA', clearAll: true },
 		})
 
-		// DeviceA has 2 video rx channels, each cleared individually and each re-read afterwards
-		expect(writes(sendFn)).toHaveLength(2)
-		expect(refreshes(sendFn)).toHaveLength(2)
+		// DeviceA has 3 video rx channels, each cleared individually and each re-read afterwards
+		expect(writes(sendFn)).toHaveLength(3)
+		expect(refreshes(sendFn)).toHaveLength(3)
 		expect(send(self)).toBe(sendFn)
 	})
 })
